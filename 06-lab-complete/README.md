@@ -4,7 +4,7 @@ Productionize agent **Long Châu AI Triage Middleware** (sản phẩm nhóm Day-
 **LLM thật qua OpenAI**) theo toàn bộ concept Day-12: Docker → Cloud → Security → Scaling.
 
 **Live (Render):** UI → https://longchau-chatbot-ui-h597.onrender.com ·
-API → https://longchau-triage-api-h597.onrender.com (chi tiết: [`../DEPLOYMENT.md`](../DEPLOYMENT.md))
+API → https://longchau-triage-api-h597.onrender.com
 
 ## Agent làm gì
 Trợ lý nhà thuốc Long Châu phân loại (triage) câu hỏi của khách rồi xử lý phù hợp:
@@ -92,4 +92,6 @@ Nhập **API Key** ở sidebar → chat. Badge route (factual/advisory/handoff/c
 python check_production_ready.py    # -> 20/20 (100%)
 ```
 
-Public URL deploy thực tế: xem [`../DEPLOYMENT.md`](../DEPLOYMENT.md).
+Public URL deploy thực tế:
+- UI: https://longchau-chatbot-ui-h597.onrender.com
+- API: https://longchau-triage-api-h597.onrender.com

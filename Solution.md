@@ -32,13 +32,11 @@
 
 ## Part 2 — Docker
 
-### Exercise 2.1 — Đọc Dockerfile
-1. **Base image:** `python:3.11` (develop, full ~1GB) / `python:3.11-slim` (production).
-2. **Working directory:** `/app` (hoặc `/build` ở stage builder).
-3. **Tại sao COPY `requirements.txt` trước code?** Tận dụng **Docker layer cache**:
-   layer cài deps chỉ rebuild khi `requirements.txt` đổi; sửa code không phải cài lại deps.
-4. **CMD vs ENTRYPOINT:** `CMD` = lệnh mặc định, dễ override khi `docker run ... <cmd>`;
-   `ENTRYPOINT` = cố định executable chính, các arg truyền vào nối sau nó.
+### Exercise 2.1 — Dockerfile questions
+1. **Base image:** develop dùng `python:3.11`, production dùng `python:3.11-slim`.
+2. **Working directory:** `/app` ở runtime, builder có thể dùng stage riêng.
+3. **COPY `requirements.txt` trước code:** để tận dụng Docker layer cache, chỉ cài lại dependencies khi file requirements đổi.
+4. **CMD vs ENTRYPOINT:** `CMD` là lệnh mặc định, có thể override; `ENTRYPOINT` là executable chính, args truyền thêm sẽ nối phía sau.
 
 ### Exercise 2.3 — Multi-stage build & image size
 - **Stage 1 (builder):** có pip + build tools, cài dependencies vào `~/.local`.
@@ -75,60 +73,220 @@
 
 ### Exercise 3.1 — Deploy
 ```bash
-# Health check
 curl https://keen-surprise-production-b717.up.railway.app/health
-{"status":"ok","uptime_seconds":3493.9,"platform":"Railway","timestamp":"2026-06-12T11:05:53.455111+00:00"}% 
+```
 
-# Agent endpoint
+Response:
+
+```json
+{"status":"ok","uptime_seconds":3493.9,"platform":"Railway","timestamp":"2026-06-12T11:05:53.455111+00:00"}
+```
+
+Test agent endpoint:
+
+```bash
 curl https://keen-surprise-production-b717.up.railway.app/ask -X POST \
   -H "Content-Type: application/json" \
-  -d '{"question": "tes"}'
-{"question":"tes","answer":"Tôi là AI agent được deploy lên cloud. Câu hỏi của bạn đã được nhận.","platform":"Railway"}%
+  -d '{"question":"tes"}'
 ```
+
+Response hợp lệ:
+
+```json
+{"question":"tes","answer":"Tôi là AI agent được deploy lên cloud. Câu hỏi của bạn đã được nhận.","platform":"Railway"}
+```
+
+### Exercise 3.2 — Compare `railway.toml` vs `render.yaml`
+| Tiêu chí | `railway.toml` | `render.yaml` |
+|---------|-----------------|---------------|
+| Phạm vi | Cấu hình 1 app/service | Blueprint có thể mô tả nhiều services |
+| Docker config | `builder = "DOCKERFILE"` | `runtime: docker` + `dockerfilePath` |
+| Env vars | Set chủ yếu qua dashboard / CLI | Có thể khai báo trong `envVars` |
+| Health check | `healthcheckPath` | `healthCheckPath` |
+| Multi-service | Thường cấu hình tách rời | Có thể mô tả chung API + worker + redis |
+
+Điểm chung:
+- đều deploy từ Docker
+- đều hỗ trợ health check
+- đều phù hợp cho app FastAPI containerized
+
+### Exercise 3.3 — Optional: GCP Cloud Run CI/CD
+Trong repo có `03-cloud-deployment/production-cloud-run/cloudbuild.yaml` và `service.yaml`.
+
+Ý chính:
+- **Cloud Build** build image từ source
+- push image lên registry
+- **Cloud Run** deploy image serverless
+- scale tự động theo traffic
+- phù hợp khi muốn CI/CD chuẩn GCP
+
+---
 
 ## Part 4 — API Security
 
-### Exercise 4.1–4.3 — Auth, Rate limit
-- **API key** kiểm tra ở dependency `verify_api_key` (`app/auth.py`), header `X-API-Key`.
-  Sai/thiếu key → **401**. Key → map ra `user_id` ổn định (sha256) để tính rate/budget theo user.
-- **Rate limiting** (`app/rate_limiter.py`): **fixed-window 60s** bằng counter trên store
-  (Redis `INCR` + `EXPIRE`). Vượt `RATE_LIMIT_PER_MINUTE` (mặc định 10) → **429** kèm `Retry-After`.
-  Đã test: request thứ 11 trong 1 phút trả 429.
-- **Rotate key:** đổi biến môi trường `AGENT_API_KEY` rồi redeploy — không sửa code.
+### Exercise 4.1 — API key authentication
+Trong `04-api-gateway/develop/app.py`:
+- API key được check ở dependency `verify_api_key`
+- client gửi key qua header `X-API-Key`
+- thiếu hoặc sai key -> trả **401**
+- rotate key bằng cách đổi giá trị key trong environment/config rồi restart hoặc redeploy
+
+### Exercise 4.2 — JWT authentication
+Trong `04-api-gateway/production/auth.py` và `app.py`:
+
+Flow:
+1. Gọi `POST /auth/token` với `username` và `password`
+2. Server tạo JWT chứa `sub`, `role`, `iat`, `exp`
+3. Client gọi `POST /ask` với header `Authorization: Bearer <token>`
+4. Dependency `verify_token` decode và verify chữ ký + expiry
+5. Token hết hạn -> **401**, token sai -> **403**
+
+Ví dụ:
+
+```bash
+curl http://localhost:8000/auth/token -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"username":"student","password":"demo123"}'
+```
+
+Sau đó dùng token:
+
+```bash
+curl http://localhost:8000/ask -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Explain JWT"}'
+```
+
+### Exercise 4.3 — Rate limiting
+Trong lab advanced security:
+- dùng **sliding window** rate limiting theo role/user
+- user thường bị limit thấp hơn admin
+- khi vượt ngưỡng -> trả **429**
+- admin có limit cao hơn nên thực tế là cách “bypass” hợp lệ trong bài lab
 
 ### Exercise 4.4 — Cost guard
-- `app/cost_guard.py`: mỗi request cộng `ESTIMATED_REQUEST_COST_USD` vào key tháng
-  `budget:{user_id}:{YYYY-MM}` trên store. Tổng vượt `MONTHLY_BUDGET_USD` ($10) → **402**.
-  Key tự `EXPIRE` ~32 ngày (tự reset sang tháng mới).
+Cost guard theo dõi chi phí usage và dừng khi vượt ngân sách:
+- check budget trước khi gọi model
+- record usage sau khi xử lý request
+- nếu vượt budget -> chặn request tiếp theo
+
+Trong Final Project `06-lab-complete/app/cost_guard.py`:
+- mỗi request cộng chi phí ước tính vào key tháng `budget:{user_id}:{YYYY-MM}`
+- vượt `MONTHLY_BUDGET_USD` -> **402**
+- key có `EXPIRE` để reset theo chu kỳ tháng
 
 ---
 
 ## Part 5 — Scaling & Reliability
 
-### 5.1 Health & Readiness
-- `GET /health` (liveness): luôn 200 nếu process sống.
-- `GET /ready` (readiness): 200 chỉ khi app init xong **và** `store.ping()` OK, ngược lại **503**
-  → LB ngừng route khi backend chưa sẵn sàng.
+### Exercise 5.1 — Health and readiness checks
+- `GET /health`: liveness, process còn sống thì trả 200
+- `GET /ready`: readiness, chỉ trả 200 khi app sẵn sàng và store ping OK; nếu chưa sẵn sàng thì trả 503
 
-### 5.2 Graceful shutdown
-- Bắt `SIGTERM`/`SIGINT` → set `_is_ready=False` (ngừng nhận traffic mới), log số request đang chạy;
-  uvicorn `timeout_graceful_shutdown=30` cho request hiện tại hoàn tất.
+### Exercise 5.2 — Graceful shutdown
+App bắt `SIGTERM` / `SIGINT`:
+- dừng nhận traffic mới
+- cho request đang chạy hoàn tất trong thời gian grace period
+- log trạng thái shutdown
 
-### 5.3 Stateless design
-- Không giữ conversation history trong RAM. Lưu trong **store** (`history:{user_id}`, list, TTL 1h).
-  Có `REDIS_URL` → state dùng chung giữa các instance (stateless thật sự);
-  không có Redis → fallback in-memory để vẫn chạy 1 container.
+### Exercise 5.3 — Stateless design
+- Không giữ conversation history trong RAM của từng instance
+- History lưu trong store dùng key theo `user_id`
+- Khi có `REDIS_URL`, nhiều instance dùng chung state qua Redis
 
-### 5.4 Load balancing
-- `docker compose up --scale agent=3` → nginx (`nginx.conf`) phân tán qua `upstream agent_cluster`,
-  có `proxy_next_upstream` failover khi 1 instance lỗi/timeout/503. Header `X-Served-By` để quan sát.
+Lưu ý:
+- Trong `06-lab-complete` có fallback in-memory để chạy local 1 instance
+- Với deployment nhiều instance để chấm stateless đúng nghĩa, cần bật Redis/shared store
 
-### 5.5 Test stateless
-- Vì history nằm ở store dùng chung, kill 1 instance không mất hội thoại — instance khác đọc tiếp
-  từ Redis bằng cùng `user_id`.
+### Exercise 5.4 — Run load-balanced stack
+
+```bash
+cd 05-scaling-reliability/production
+docker compose up --scale agent=3
+```
+
+Kết quả:
+- nginx load-balance qua nhiều instance agent
+- nếu một instance lỗi, request vẫn có thể failover sang instance khác
+
+### Exercise 5.5 — Test stateless design
+Ý tưởng test:
+1. Tạo conversation với cùng `user_id`
+2. Kill một instance agent
+3. Gửi request tiếp theo với cùng `user_id`
+4. Nếu history vẫn còn, chứng tỏ state đang nằm ở shared store chứ không nằm trong RAM của instance bị kill
 
 ---
 
 ## Part 6 — Final Project
-Xem **`06-lab-complete/`** (source) + **`DEPLOYMENT.md`** (URL).
-`python check_production_ready.py` → **20/20 (100%)**.
+
+**Project:** `06-lab-complete/`  
+**Tên agent:** Long Châu AI Triage Agent  
+**Live deployment:** API `https://longchau-triage-api-h597.onrender.com`, UI `https://longchau-chatbot-ui-h597.onrender.com`
+
+### Functional Requirements
+- **Agent works:** API trả lời được nhiều route nghiệp vụ: `factual`, `advisory_gather`, `advisory_handoff`, `out_of_scope`, `crisis`
+- **Conversation history:** lịch sử được lưu theo `user_id` trong store để giữ context qua nhiều request
+- **Error handling:** request sai schema trả `422`; thiếu key trả `401`; vượt rate limit trả `429`; vượt budget trả `402`
+
+Ví dụ endpoint chính:
+
+```bash
+curl -X POST https://longchau-triage-api-h597.onrender.com/ask \
+  -H "X-API-Key: <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"test","question":"Thuốc Efferalgan là gì?"}'
+```
+
+### Docker & Configuration
+- Multi-stage Dockerfile trong `06-lab-complete/Dockerfile`
+- Slim base image, non-root user, có health check
+- Docker image production khoảng **272 MB**, đạt yêu cầu **< 500 MB**
+- `docker-compose.yml` gồm `nginx + agent + redis + ui`
+- Config lấy từ env qua `app/config.py`
+
+Các env vars quan trọng:
+- `AGENT_API_KEY`
+- `OPENAI_API_KEY`
+- `LLM_MODEL`
+- `RATE_LIMIT_PER_MINUTE`
+- `MONTHLY_BUDGET_USD`
+- `REDIS_URL`
+
+### Security
+- **API key auth:** `app/auth.py`, header `X-API-Key`
+- **Rate limiting:** `app/rate_limiter.py`, mặc định 10 req/min
+- **Cost guard:** `app/cost_guard.py`, budget theo tháng
+- **No hardcoded secrets:** secrets đọc từ environment, không hardcode trong source app production
+
+### Reliability
+- **Health check:** `GET /health`
+- **Readiness check:** `GET /ready`
+- **Graceful shutdown:** xử lý SIGTERM trong app lifecycle
+- **Stateless design:** dùng store abstraction; khi có Redis thì state dùng chung cho nhiều instances
+
+### Deployment
+- Public API URL: `https://longchau-triage-api-h597.onrender.com`
+- Public UI URL: `https://longchau-chatbot-ui-h597.onrender.com`
+- Deployment config có cả `railway.toml` và `render.yaml`
+- Environment variables được set trên platform cho API và UI services
+
+### Verified Results
+Theo kết quả deploy đã verify:
+- `GET /health` và `GET /ready` -> 200
+- `POST /ask` thiếu key -> 401
+- rate limit -> 429 sau 10 request/phút
+- streaming `/ask/stream` hoạt động
+- image size ~272 MB
+
+Checklist tự động:
+
+```bash
+cd 06-lab-complete
+python check_production_ready.py
+```
+
+Kết quả:
+- **20/20 checks passed**
+- **100% production-ready**
