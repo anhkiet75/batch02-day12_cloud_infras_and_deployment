@@ -2,7 +2,9 @@
 builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+# 1 worker: in-memory store nhất quán khi chưa gắn Redis.
+# Có Redis (REDIS_URL) thì có thể tăng workers/instances vì app stateless.
+startCommand = "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"

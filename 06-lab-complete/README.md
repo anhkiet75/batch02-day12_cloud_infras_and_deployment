@@ -1,100 +1,67 @@
-# Lab 12 — Complete Production Agent
+# Final Project — VinBank Production Agent
 
-Kết hợp TẤT CẢ những gì đã học trong 1 project hoàn chỉnh.
+Productionize agent **VinBank customer-service + Guardrails** (port từ Day-11) theo
+toàn bộ concept Day-12: Docker → Cloud → Security → Scaling.
 
-## Checklist Deliverable
+## Agent làm gì
+Trợ lý ngân hàng VinBank trả lời câu hỏi về tài khoản, lãi suất, chuyển tiền, thẻ, vay.
+Có **guardrails** thật:
+- **Input guard:** chặn prompt-injection, chủ đề bị cấm, câu hỏi ngoài lĩnh vực banking → trả lời từ chối an toàn.
+- **Output guard:** redact secret/PII (API key, mật khẩu, internal hostname, số thẻ) nếu lỡ lọt ra.
+- **LLM:** gọi **Gemini** khi có `GOOGLE_API_KEY`; không có key thì chạy **mock deterministic** (guardrails vẫn hoạt động).
 
-- [x] Dockerfile (multi-stage, < 500 MB)
-- [x] docker-compose.yml (agent + redis)
-- [x] .dockerignore
-- [x] Health check endpoint (`GET /health`)
-- [x] Readiness endpoint (`GET /ready`)
-- [x] API Key authentication
-- [x] Rate limiting
-- [x] Cost guard
-- [x] Config từ environment variables
-- [x] Structured logging
-- [x] Graceful shutdown
-- [x] Public URL ready (Railway / Render config)
+## Production checklist
+- [x] Config 12-factor từ environment (`app/config.py`)
+- [x] Multi-stage Dockerfile, non-root, **304 MB** (< 500 MB)
+- [x] API key auth (`app/auth.py`) — thiếu/sai key → 401
+- [x] Rate limiting fixed-window (`app/rate_limiter.py`) — 10 req/min → 429
+- [x] Cost guard theo tháng (`app/cost_guard.py`) — vượt budget → 402
+- [x] `GET /health` (liveness) + `GET /ready` (readiness, check store)
+- [x] Graceful shutdown (SIGTERM)
+- [x] Stateless: history trong store Redis/in-memory (`app/store.py`)
+- [x] Structured JSON logging
+- [x] Deploy config: `railway.toml`, `render.yaml`
 
----
-
-## Cấu Trúc
-
+## Cấu trúc
 ```
 06-lab-complete/
 ├── app/
-│   ├── main.py         # Entry point — kết hợp tất cả
-│   ├── config.py       # 12-factor config
-│   ├── auth.py         # API Key + JWT
-│   ├── rate_limiter.py # Rate limiting
-│   └── cost_guard.py   # Budget protection
-├── Dockerfile          # Multi-stage, production-ready
-├── docker-compose.yml  # Full stack
-├── railway.toml        # Deploy Railway
-├── render.yaml         # Deploy Render
-├── .env.example        # Template
-├── .dockerignore
-└── requirements.txt
+│   ├── main.py         # FastAPI: endpoints + lifecycle + middleware
+│   ├── config.py       # 12-factor settings + banking topics
+│   ├── agent.py        # Brain: guardrails -> Gemini/mock -> redact
+│   ├── guardrails.py   # Input/output guardrails (port Day-11)
+│   ├── auth.py         # API key -> user_id
+│   ├── rate_limiter.py # Fixed-window rate limit
+│   ├── cost_guard.py   # Monthly budget guard
+│   └── store.py        # Redis hoặc in-memory (cùng interface)
+├── Dockerfile          # Multi-stage
+├── docker-compose.yml  # nginx + agent(scale) + redis
+├── nginx.conf          # Load balancer
+├── railway.toml / render.yaml
+├── requirements.txt / .env.example / .dockerignore
+└── check_production_ready.py
 ```
 
----
-
-## Chạy Local
-
+## Chạy local
 ```bash
-# 1. Setup
-cp .env.example .env
+cp .env.example .env.local      # set AGENT_API_KEY (và GOOGLE_API_KEY nếu muốn LLM thật)
+docker compose up --scale agent=3   # nginx LB + 3 agent + redis
 
-# 2. Chạy với Docker Compose
-docker compose up
-
-# 3. Test
 curl http://localhost/health
-
-# 4. Lấy API key từ .env, test endpoint
-API_KEY=$(grep AGENT_API_KEY .env | cut -d= -f2)
-curl -H "X-API-Key: $API_KEY" \
-     -X POST http://localhost/ask \
-     -H "Content-Type: application/json" \
-     -d '{"question": "What is deployment?"}'
+curl http://localhost/ask -X POST \
+  -H "X-API-Key: <key>" -H "Content-Type: application/json" \
+  -d '{"question": "Lãi suất tiết kiệm VinBank?"}'
 ```
 
----
-
-## Deploy Railway (< 5 phút)
-
+Single container (không Redis — dùng in-memory store):
 ```bash
-# Cài Railway CLI
-npm i -g @railway/cli
-
-# Login và deploy
-railway login
-railway init
-railway variables set OPENAI_API_KEY=sk-...
-railway variables set AGENT_API_KEY=your-secret-key
-railway up
-
-# Nhận public URL!
-railway domain
+docker build -t vinbank-agent:prod .
+docker run -p 8000:8000 -e AGENT_API_KEY=secret vinbank-agent:prod
 ```
 
----
-
-## Deploy Render
-
-1. Push repo lên GitHub
-2. Render Dashboard → New → Blueprint
-3. Connect repo → Render đọc `render.yaml`
-4. Set secrets: `OPENAI_API_KEY`, `AGENT_API_KEY`
-5. Deploy → Nhận URL!
-
----
-
-## Kiểm Tra Production Readiness
-
+## Kiểm tra production-ready
 ```bash
-python check_production_ready.py
+python check_production_ready.py    # -> 20/20 (100%)
 ```
 
-Script này kiểm tra tất cả items trong checklist và báo cáo những gì còn thiếu.
+Public URL deploy thực tế: xem [`../DEPLOYMENT.md`](../DEPLOYMENT.md).

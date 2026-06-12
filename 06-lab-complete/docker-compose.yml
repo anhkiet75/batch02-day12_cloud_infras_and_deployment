@@ -1,13 +1,11 @@
-version: "3.9"
-
 services:
   agent:
     build: .
-    ports:
-      - "8000:8000"
+    # KHÔNG map cổng trực tiếp — nginx là điểm vào duy nhất (load balancer).
+    # Scale: docker compose up --scale agent=3
     environment:
       - ENVIRONMENT=staging
-      - APP_NAME=Production AI Agent
+      - APP_NAME=VinBank Production Agent
       - REDIS_URL=redis://redis:6379/0
     env_file:
       - .env.local
@@ -26,8 +24,23 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - agent
+    restart: unless-stopped
+
+volumes:
+  redis-data:

@@ -7,9 +7,6 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-RUN apt-get update && apt-get install -y gcc libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
@@ -25,14 +22,15 @@ WORKDIR /app
 # Copy packages từ builder
 COPY --from=builder /root/.local /home/agent/.local
 
-# Copy application
+# Copy application (agent self-contained — không phụ thuộc utils/ ở repo root)
 COPY app/ ./app/
-COPY utils/ ./utils/
 
 RUN chown -R agent:agent /app
 
 USER agent
 
+# PYTHONUSERBASE phải khớp nơi copy site-packages (home của user agent là /app).
+ENV PYTHONUSERBASE=/home/agent/.local
 ENV PATH=/home/agent/.local/bin:$PATH
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1
