@@ -1,7 +1,8 @@
 """Production config — 12-Factor: tất cả lấy từ environment variables.
 
-Agent gốc: VinBank customer-service assistant (port từ Day-11 Guardrails lab),
-được productionize cho Day-12: auth + rate limit + cost guard + stateless Redis.
+Agent gốc: **Long Châu AI Triage Middleware** (sản phẩm nhóm Day-06, dùng LLM thật
+qua OpenRouter), được productionize cho Day-12: auth + rate limit + cost guard +
+stateless Redis + health/readiness + graceful shutdown.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,17 +15,19 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # ── App ─────────────────────────────────────────────
-    app_name: str = "VinBank Production Agent"
+    app_name: str = "Long Chau Triage Agent"
     app_version: str = "1.0.0"
 
     # ── Storage (stateless design) ──────────────────────
-    # Để trống -> tự fallback sang in-memory store (chạy 1 container không cần Redis).
+    # Để trống -> fallback in-memory store (chạy 1 container không cần Redis).
     redis_url: str = ""
 
-    # ── LLM (Gemini) ────────────────────────────────────
-    # Không có key -> agent chạy ở chế độ mock deterministic (vẫn đủ guardrails).
-    google_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash-lite"
+    # ── LLM (OpenAI) ────────────────────────────────────
+    # Không có key -> agent chạy stub heuristic (vẫn đủ safety gate + triage cơ bản).
+    openai_api_key: str = ""
+    llm_model: str = "gpt-4o-mini"
+    # Endpoint tương thích OpenAI; đổi để dùng OpenRouter/Azure mà không sửa code.
+    llm_base_url: str = "https://api.openai.com/v1/chat/completions"
 
     # ── Security ────────────────────────────────────────
     agent_api_key: str = "dev-key-change-me"
@@ -45,16 +48,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-# ── Banking domain knowledge (port từ Day-11 core/config.py) ──
-ALLOWED_TOPICS = [
-    "banking", "account", "transaction", "transfer", "loan", "interest",
-    "savings", "credit", "deposit", "withdrawal", "balance", "payment",
-    "tai khoan", "giao dich", "tiet kiem", "lai suat", "chuyen tien",
-    "the tin dung", "so du", "vay", "ngan hang", "atm", "vinbank",
-]
-
-BLOCKED_TOPICS = [
-    "hack", "exploit", "weapon", "drug", "illegal",
-    "violence", "gambling", "bomb", "kill", "steal",
-]

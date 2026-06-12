@@ -1,1 +1,1 @@
-"""VinBank Production Agent — Day-12 productionization of the Day-11 guardrails agent."""
+"""Long Châu AI Triage Agent — Day-12 productionization of the Day-06 group project."""

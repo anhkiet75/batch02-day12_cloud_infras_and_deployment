@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: vinbank-production-agent
+    name: longchau-triage-agent
     runtime: docker
     dockerfilePath: ./Dockerfile
     region: singapore
@@ -12,10 +12,10 @@ services:
         value: production
       - key: APP_VERSION
         value: "1.0.0"
-      - key: GOOGLE_API_KEY      # set thủ công trong dashboard (secret)
+      - key: OPENAI_API_KEY      # set thủ công trong dashboard (secret)
         sync: false
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash-lite
+      - key: LLM_MODEL
+        value: gpt-4o-mini
       - key: AGENT_API_KEY
         generateValue: true
       - key: RATE_LIMIT_PER_MINUTE

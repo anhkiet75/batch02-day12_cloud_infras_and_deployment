@@ -1,7 +1,8 @@
-"""Streamlit chat UI cho VinBank Production Agent.
+"""Streamlit chat UI cho Long Châu Triage Agent.
 
-Gọi backend FastAPI qua endpoint streaming /ask/stream và hiển thị câu trả lời
-gõ dần (st.write_stream). UI tách riêng khỏi API container để image API vẫn slim.
+Gọi backend FastAPI (/ask/stream) và hiển thị câu trả lời gõ dần (st.write_stream),
+kèm badge route (factual / advisory / handoff / out_of_scope / crisis).
+UI tách riêng khỏi API container để image API vẫn slim.
 
 Chạy:
     pip install -r requirements.txt
@@ -16,9 +17,16 @@ DEFAULT_API = os.getenv(
     "AGENT_API_URL", "https://vinbank-production-agent-production.up.railway.app"
 )
 
-st.set_page_config(page_title="VinBank Agent", page_icon="🏦")
+ROUTE_BADGE = {
+    "factual": ("🟢 Factual", "Trả lời thông tin chung"),
+    "advisory_gather": ("🟡 Advisory", "Đang hỏi thêm để tư vấn"),
+    "advisory_handoff": ("🟠 Handoff", "Chuyển dược sĩ"),
+    "out_of_scope": ("⚪ Out of scope", "Ngoài phạm vi dược"),
+    "crisis": ("🔴 Crisis", "Cảnh báo an toàn"),
+}
 
-# ── Sidebar: cấu hình kết nối ────────────────────────────
+st.set_page_config(page_title="Long Châu AI Triage", page_icon="💊")
+
 with st.sidebar:
     st.header("⚙️ Kết nối")
     api_url = st.text_input("API URL", value=DEFAULT_API).rstrip("/")
@@ -37,15 +45,22 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-st.title("🏦 VinBank Customer Agent")
-st.caption("Trợ lý ngân hàng có guardrails • auth • rate limit • streaming")
+    st.divider()
+    st.caption("Thử hỏi:")
+    st.caption("• Paracetamol có công dụng gì?\n"
+               "• Tôi bị tiểu đường, uống thêm ibuprofen được không?\n"
+               "• Tôi muốn mua vitamin C")
+
+st.title("💊 Long Châu AI Triage")
+st.caption("Tư vấn thuốc thông minh • safety gate • auth • rate limit • streaming")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Hiển thị lịch sử hội thoại (client-side, chỉ để xem).
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
+        if msg.get("route") and msg["route"] in ROUTE_BADGE:
+            st.caption(ROUTE_BADGE[msg["route"]][0])
         st.markdown(msg["content"])
 
 
@@ -59,8 +74,8 @@ def _error_message(status_code: int, text: str) -> str:
     return mapping.get(status_code, f"Lỗi {status_code}: {text[:200]}")
 
 
-def stream_answer(question: str):
-    """Yield từng chunk text từ /ask/stream để dùng với st.write_stream."""
+def stream_answer(question: str, route_holder: dict):
+    """Yield từng chunk từ /ask/stream; lưu route từ header vào route_holder."""
     with requests.post(
         f"{api_url}/ask/stream",
         json={"question": question},
@@ -68,6 +83,7 @@ def stream_answer(question: str):
         stream=True,
         timeout=60,
     ) as resp:
+        route_holder["route"] = resp.headers.get("X-Agent-Route")
         if not resp.ok:
             yield _error_message(resp.status_code, resp.text)
             return
@@ -77,7 +93,7 @@ def stream_answer(question: str):
                 yield chunk
 
 
-def full_answer(question: str) -> str:
+def full_answer(question: str, route_holder: dict) -> str:
     resp = requests.post(
         f"{api_url}/ask",
         json={"question": question},
@@ -86,11 +102,12 @@ def full_answer(question: str) -> str:
     )
     if not resp.ok:
         return _error_message(resp.status_code, resp.text)
-    return resp.json().get("answer", "")
+    data = resp.json()
+    route_holder["route"] = data.get("route")
+    return data.get("answer", "")
 
 
-# ── Chat input ───────────────────────────────────────────
-if prompt := st.chat_input("Hỏi về tài khoản, lãi suất, chuyển tiền..."):
+if prompt := st.chat_input("Hỏi về thuốc, công dụng, mua sản phẩm..."):
     if not api_key:
         st.warning("Nhập API Key ở sidebar trước nhé.")
         st.stop()
@@ -99,15 +116,22 @@ if prompt := st.chat_input("Hỏi về tài khoản, lãi suất, chuyển tiề
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    route_holder: dict = {}
     with st.chat_message("assistant"):
         try:
             if use_stream:
-                answer = st.write_stream(stream_answer(prompt))
+                answer = st.write_stream(stream_answer(prompt, route_holder))
             else:
-                answer = full_answer(prompt)
+                answer = full_answer(prompt, route_holder)
                 st.markdown(answer)
+            route = route_holder.get("route")
+            if route and route in ROUTE_BADGE:
+                st.caption(f"{ROUTE_BADGE[route][0]} — {ROUTE_BADGE[route][1]}")
         except Exception as exc:  # noqa: BLE001
             answer = f"Không kết nối được API: {exc}"
             st.error(answer)
+            route = None
 
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.session_state.messages.append(
+        {"role": "assistant", "content": answer, "route": route_holder.get("route")}
+    )

@@ -1,14 +1,14 @@
 """
-VinBank Production Agent — Final project Day-12.
+Long Châu Triage Agent — Final project Day-12.
 
-Agent gốc: VinBank customer-service assistant + guardrails (Day-11),
+Agent gốc: **Long Châu AI Triage Middleware** (nhóm Day-06, LLM thật qua OpenRouter),
 được productionize đầy đủ:
   ✅ Config 12-factor (environment variables)
   ✅ Structured JSON logging
   ✅ API Key authentication
   ✅ Rate limiting (per user)
   ✅ Cost guard (monthly budget per user)
-  ✅ Input/output guardrails (injection, off-topic, secret redaction)
+  ✅ Safety gate + triage (crisis / high-risk / out-of-scope)
   ✅ Health check + Readiness probe
   ✅ Graceful shutdown (SIGTERM)
   ✅ Stateless design (conversation history trong store Redis/memory)
@@ -25,12 +25,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from .agent import answer as agent_answer
 from .auth import verify_api_key
 from .config import settings
 from .cost_guard import check_budget
 from .rate_limiter import check_rate_limit
 from .store import backend, store
+from .triage import triage
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -38,10 +38,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+HISTORY_TURNS = 8   # số message gần nhất giữ lại làm context
+
 
 def log_event(**fields) -> None:
     """JSON structured log — 1 dòng/sự kiện, dễ ingest vào log aggregator."""
     logger.info(json.dumps(fields, ensure_ascii=False))
+
+
+def _llm_mode() -> str:
+    return "openai" if settings.openai_api_key else "stub"
 
 
 app = FastAPI(
@@ -70,9 +76,8 @@ def on_startup() -> None:
     global _is_ready
     store.ping()
     _is_ready = True
-    log_event(event="startup", store=backend,
-              llm="gemini" if settings.google_api_key else "mock",
-              env=settings.environment)
+    log_event(event="startup", store=backend, llm=_llm_mode(),
+              model=settings.llm_model, env=settings.environment)
 
 
 @app.on_event("shutdown")
@@ -108,11 +113,45 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
-    status: str
+    route: str
+    safety_gate_triggered: bool
+    handoff_summary: str | None = None
+    products: list[dict] = []
     user_id: str
     history_length: int
     model: str
     timestamp: str
+
+
+# ── Conversation history (stateless qua store) ──────────
+def _load_history(user_id: str) -> list[dict]:
+    raw = store.lrange(f"history:{user_id}", -HISTORY_TURNS, -1)
+    history = []
+    for item in raw:
+        try:
+            history.append(json.loads(item))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return history
+
+
+def _save_turn(user_id: str, question: str, reply: str) -> None:
+    key = f"history:{user_id}"
+    store.rpush(key, json.dumps({"role": "user", "content": question}, ensure_ascii=False))
+    store.rpush(key, json.dumps({"role": "assistant", "content": reply}, ensure_ascii=False))
+    store.expire(key, 3600)
+
+
+async def _run_triage(user_id: str, question: str) -> dict:
+    """Chạy triage + lưu history. Trả về dict kết quả."""
+    if not _is_ready:
+        raise HTTPException(status_code=503, detail="Agent not ready")
+    history = _load_history(user_id)
+    result = await triage(question, history)
+    _save_turn(user_id, question, result.get("reply", ""))
+    log_event(event="agent_call", user=user_id, route=result.get("route"),
+              safety=result.get("safety_gate_triggered"), q_len=len(question))
+    return result
 
 
 # ── Endpoints ───────────────────────────────────────────
@@ -122,8 +161,8 @@ def root():
         "app": settings.app_name,
         "version": settings.app_version,
         "environment": settings.environment,
-        "endpoints": {"ask": "POST /ask (X-API-Key)", "health": "GET /health",
-                      "ready": "GET /ready"},
+        "endpoints": {"ask": "POST /ask (X-API-Key)", "stream": "POST /ask/stream",
+                      "health": "GET /health", "ready": "GET /ready"},
     }
 
 
@@ -148,77 +187,56 @@ def ready():
         store.ping()
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Store unavailable") from exc
-    return {"ready": True, "store": backend, "in_flight_requests": _in_flight}
+    return {"ready": True, "store": backend, "llm": _llm_mode(),
+            "in_flight_requests": _in_flight}
 
 
 @app.post("/ask", response_model=AskResponse, tags=["Agent"])
-def ask(
+async def ask(
     body: AskRequest,
     user_id: str = Depends(verify_api_key),
     _rate_limit: None = Depends(check_rate_limit),
     _budget: None = Depends(check_budget),
 ):
-    """Hỏi VinBank agent. Yêu cầu header `X-API-Key`. Stateless: history lưu ở store."""
-    if not _is_ready:
-        raise HTTPException(status_code=503, detail="Agent not ready")
-
-    history_key = f"history:{user_id}"
-    history = store.lrange(history_key, 0, -1)
-
-    reply, status = agent_answer(body.question, history)
-
-    store.rpush(history_key, f"user: {body.question}")
-    store.rpush(history_key, f"assistant: {reply}")
-    store.expire(history_key, 3600)
-
-    log_event(event="agent_call", user=user_id, status=status,
-              q_len=len(body.question))
-
+    """Hỏi Long Châu triage agent. Header `X-API-Key`. Stateless: history lưu ở store."""
+    result = await _run_triage(user_id, body.question)
     return AskResponse(
-        answer=reply,
-        status=status,
+        answer=result.get("reply_md") or result.get("reply", ""),
+        route=result.get("route", "unknown"),
+        safety_gate_triggered=result.get("safety_gate_triggered", False),
+        handoff_summary=result.get("handoff_summary"),
+        products=result.get("products") or [],
         user_id=user_id,
-        history_length=len(history) + 2,
-        model=settings.gemini_model if settings.google_api_key else "mock",
+        history_length=len(_load_history(user_id)),
+        model=result.get("model", _llm_mode()),
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
 
 @app.post("/ask/stream", tags=["Agent"])
-def ask_stream(
+async def ask_stream(
     body: AskRequest,
     user_id: str = Depends(verify_api_key),
     _rate_limit: None = Depends(check_rate_limit),
     _budget: None = Depends(check_budget),
 ):
-    """Như /ask nhưng trả lời theo kiểu streaming (chunked text/plain) cho UI chat.
+    """Như /ask nhưng stream câu trả lời (chunked text/plain) cho UI chat.
 
-    Câu trả lời được tính trọn vẹn (đi qua output guardrail) rồi mới stream từng từ
-    -> giữ nguyên tính an toàn của guardrail, đồng thời cho trải nghiệm gõ dần.
+    Triage tính trọn kết quả (qua safety gate) rồi mới stream từng từ -> giữ an toàn,
+    đồng thời cho trải nghiệm gõ dần. Route trả qua header `X-Agent-Route`.
     """
-    if not _is_ready:
-        raise HTTPException(status_code=503, detail="Agent not ready")
-
-    history_key = f"history:{user_id}"
-    history = store.lrange(history_key, 0, -1)
-    reply, status = agent_answer(body.question, history)
-
-    store.rpush(history_key, f"user: {body.question}")
-    store.rpush(history_key, f"assistant: {reply}")
-    store.expire(history_key, 3600)
-
-    log_event(event="agent_call_stream", user=user_id, status=status,
-              q_len=len(body.question))
+    result = await _run_triage(user_id, body.question)
+    reply = result.get("reply_md") or result.get("reply", "")
 
     def token_generator():
         for word in reply.split(" "):
             yield word + " "
-            time.sleep(0.04)
+            time.sleep(0.03)
 
     return StreamingResponse(
         token_generator(),
         media_type="text/plain; charset=utf-8",
-        headers={"X-Agent-Status": status},
+        headers={"X-Agent-Route": result.get("route", "unknown")},
     )
 
 

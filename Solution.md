@@ -1,7 +1,7 @@
 # Day 12 Lab — Solution (Đáp án Codelab Part 1 → 5)
 
-> Agent dùng cho Final Project (Part 6): **VinBank Production Agent** — port từ
-> agent guardrails ở Day-11, productionize đầy đủ trong `06-lab-complete/`.
+> Agent dùng cho Final Project (Part 6): **Long Châu AI Triage Agent** — port từ
+> sản phẩm nhóm Day-06 (LLM thật qua OpenAI), productionize đầy đủ trong `06-lab-complete/`.
 
 ---
 
@@ -45,13 +45,13 @@
 - **Stage 2 (runtime):** image slim sạch, **chỉ copy site-packages + source** từ builder
   → không mang theo build tools → image nhỏ và bề mặt tấn công ít hơn.
 
-**Số đo thực tế (build trên máy lab):**
+**Số đo thực tế:**
 | Image | Kiểu build | Size |
 |-------|-----------|------|
-| `agent-develop` | single-stage `python:3.11` | **1.67 GB** |
-| `vinbank-agent:prod` (Final Project) | multi-stage `python:3.11-slim` | **304 MB** |
+| `myagent-develop` | single-stage `python:3.11` | **1.67 GB** |
+| `mygent-advanced` | multi-stage `python:3.11-slim` | **262MB** |
 
-→ Multi-stage giảm **~82%** dung lượng và đạt yêu cầu **< 500 MB**.
+→ Multi-stage giảm **~84%** dung lượng và đạt yêu cầu **< 500 MB**.
 
 ### Exercise 2.4 — Docker Compose stack
 3 service: **nginx** (load balancer, cổng vào 80) → **agent** (n instance, scale được) →
@@ -74,10 +74,17 @@
 Điểm chung: cả hai đều trỏ health check `/health`, có restart policy, deploy từ Docker.
 
 ### Exercise 3.1 — Deploy
-- Platform: **Railway** (Dockerfile). Config: `06-lab-complete/railway.toml`.
-- Public URL & lệnh test: xem **`DEPLOYMENT.md`**.
+```bash
+# Health check
+curl https://keen-surprise-production-b717.up.railway.app/health
+{"status":"ok","uptime_seconds":3493.9,"platform":"Railway","timestamp":"2026-06-12T11:05:53.455111+00:00"}% 
 
----
+# Agent endpoint
+curl https://keen-surprise-production-b717.up.railway.app/ask -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"question": "tes"}'
+{"question":"tes","answer":"Tôi là AI agent được deploy lên cloud. Câu hỏi của bạn đã được nhận.","platform":"Railway"}%
+```
 
 ## Part 4 — API Security
 
