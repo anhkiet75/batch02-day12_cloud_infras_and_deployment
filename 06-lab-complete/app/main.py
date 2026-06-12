@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agent import answer as agent_answer
@@ -180,6 +181,44 @@ def ask(
         history_length=len(history) + 2,
         model=settings.gemini_model if settings.google_api_key else "mock",
         timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@app.post("/ask/stream", tags=["Agent"])
+def ask_stream(
+    body: AskRequest,
+    user_id: str = Depends(verify_api_key),
+    _rate_limit: None = Depends(check_rate_limit),
+    _budget: None = Depends(check_budget),
+):
+    """Như /ask nhưng trả lời theo kiểu streaming (chunked text/plain) cho UI chat.
+
+    Câu trả lời được tính trọn vẹn (đi qua output guardrail) rồi mới stream từng từ
+    -> giữ nguyên tính an toàn của guardrail, đồng thời cho trải nghiệm gõ dần.
+    """
+    if not _is_ready:
+        raise HTTPException(status_code=503, detail="Agent not ready")
+
+    history_key = f"history:{user_id}"
+    history = store.lrange(history_key, 0, -1)
+    reply, status = agent_answer(body.question, history)
+
+    store.rpush(history_key, f"user: {body.question}")
+    store.rpush(history_key, f"assistant: {reply}")
+    store.expire(history_key, 3600)
+
+    log_event(event="agent_call_stream", user=user_id, status=status,
+              q_len=len(body.question))
+
+    def token_generator():
+        for word in reply.split(" "):
+            yield word + " "
+            time.sleep(0.04)
+
+    return StreamingResponse(
+        token_generator(),
+        media_type="text/plain; charset=utf-8",
+        headers={"X-Agent-Status": status},
     )
 
 

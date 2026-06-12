@@ -57,6 +57,17 @@ curl -X POST $URL/ask -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
 # status: blocked_prompt_injection
 ```
 
+### Streaming (cho UI chat — chunked text/plain)
+```bash
+curl -N -X POST $URL/ask/stream \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"question":"Lãi suất tiết kiệm VinBank?"}'
+# Câu trả lời gõ dần; header X-Agent-Status = mock | blocked_off_topic | ...
+```
+
+Giao diện **Streamlit** (chat + streaming): xem `06-lab-complete/ui/` —
+`AGENT_API_URL=$URL streamlit run ui/streamlit_app.py`.
+
 ### Rate limiting (10 req/min → 429)
 ```bash
 for i in $(seq 1 12); do

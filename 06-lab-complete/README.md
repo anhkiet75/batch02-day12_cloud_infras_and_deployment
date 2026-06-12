@@ -22,11 +22,19 @@ Có **guardrails** thật:
 - [x] Structured JSON logging
 - [x] Deploy config: `railway.toml`, `render.yaml`
 
+## Endpoints
+| Method | Path | Mô tả |
+|--------|------|-------|
+| GET | `/health` | Liveness |
+| GET | `/ready` | Readiness (check store) |
+| POST | `/ask` | Hỏi agent (JSON 1 lần) |
+| POST | `/ask/stream` | Hỏi agent, **streaming** chunked text (dùng cho UI) |
+
 ## Cấu trúc
 ```
 06-lab-complete/
 ├── app/
-│   ├── main.py         # FastAPI: endpoints + lifecycle + middleware
+│   ├── main.py         # FastAPI: endpoints (+ /ask/stream) + lifecycle
 │   ├── config.py       # 12-factor settings + banking topics
 │   ├── agent.py        # Brain: guardrails -> Gemini/mock -> redact
 │   ├── guardrails.py   # Input/output guardrails (port Day-11)
@@ -34,13 +42,30 @@ Có **guardrails** thật:
 │   ├── rate_limiter.py # Fixed-window rate limit
 │   ├── cost_guard.py   # Monthly budget guard
 │   └── store.py        # Redis hoặc in-memory (cùng interface)
-├── Dockerfile          # Multi-stage
-├── docker-compose.yml  # nginx + agent(scale) + redis
+├── ui/                 # Streamlit chat UI (image riêng)
+│   ├── streamlit_app.py
+│   ├── requirements.txt
+│   └── Dockerfile
+├── Dockerfile          # Multi-stage (API)
+├── docker-compose.yml  # nginx + agent(scale) + redis + ui
 ├── nginx.conf          # Load balancer
 ├── railway.toml / render.yaml
 ├── requirements.txt / .env.example / .dockerignore
 └── check_production_ready.py
 ```
+
+## Giao diện Streamlit (chat + streaming)
+Chạy UI trỏ vào API (deployed hoặc local):
+```bash
+cd ui
+pip install -r requirements.txt
+# Trỏ vào API muốn dùng (mặc định = URL Railway đã deploy)
+export AGENT_API_URL=https://vinbank-production-agent-production.up.railway.app
+streamlit run streamlit_app.py     # mở http://localhost:8501
+```
+Nhập **API Key** ở sidebar → chat. Bật/tắt **Streaming** để so sánh `/ask/stream` vs `/ask`.
+
+Hoặc chạy cả stack (API + UI) bằng compose: `docker compose up` → UI tại `http://localhost:8501`.
 
 ## Chạy local
 ```bash

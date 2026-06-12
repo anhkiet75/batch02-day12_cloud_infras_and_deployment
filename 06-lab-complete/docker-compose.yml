@@ -42,5 +42,16 @@ services:
       - agent
     restart: unless-stopped
 
+  ui:
+    build: ./ui
+    ports:
+      - "8501:8501"
+    environment:
+      # UI gọi API qua nginx load balancer (điểm vào nội bộ của stack).
+      - AGENT_API_URL=http://nginx:80
+    depends_on:
+      - nginx
+    restart: unless-stopped
+
 volumes:
   redis-data:
