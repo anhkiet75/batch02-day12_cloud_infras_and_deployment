@@ -1,26 +1,60 @@
+# Render Blueprint — deploy CẢ API + UI (1 lần) cho Long Châu Triage Agent.
+#
+# LƯU Ý: Render chỉ auto-detect Blueprint khi render.yaml nằm ở REPO ROOT.
+# File này đặt trong 06-lab-complete/ để gom cùng project. Muốn dùng Blueprint:
+#   - copy file này ra repo root, HOẶC
+#   - deploy tay: New → Web Service → Root Directory = 06-lab-complete (API),
+#     06-lab-complete/ui (UI) — cách này khỏi cần Blueprint, set Root Directory trên form.
+#
+# Khi tạo: set OPENAI_API_KEY (secret) cho service API. AGENT_API_KEY tự generate,
+# share cho cả 2 service qua env group.
+
+envVarGroups:
+  - name: longchau-shared
+    envVars:
+      - key: AGENT_API_KEY
+        generateValue: true        # cùng 1 key cho API + UI
+
 services:
+  # ── Backend API (FastAPI, Docker multi-stage) ──
   - type: web
-    name: longchau-triage-agent
+    name: longchau-triage-api
     runtime: docker
-    dockerfilePath: ./Dockerfile
+    repo: https://github.com/anhkiet75/batch02-day12_cloud_infras_and_deployment
+    branch: main
+    # rootDir = thư mục service: Render dùng làm CẢ nơi chứa Dockerfile lẫn build context.
+    rootDir: 06-lab-complete
     region: singapore
     plan: free
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      - fromGroup: longchau-shared
       - key: ENVIRONMENT
         value: production
-      - key: APP_VERSION
-        value: "1.0.0"
-      - key: OPENAI_API_KEY      # set thủ công trong dashboard (secret)
-        sync: false
       - key: LLM_MODEL
         value: gpt-4o-mini
-      - key: AGENT_API_KEY
-        generateValue: true
+      - key: OPENAI_API_KEY        # set thủ công trong dashboard (secret)
+        sync: false
       - key: RATE_LIMIT_PER_MINUTE
         value: "10"
       - key: MONTHLY_BUDGET_USD
         value: "10.0"
-      # REDIS_URL: thêm Render Key Value service rồi map vào đây.
-      # Bỏ trống -> agent dùng in-memory store.
+
+  # ── Streamlit Chatbot UI ──
+  - type: web
+    name: longchau-chatbot-ui
+    runtime: docker
+    repo: https://github.com/anhkiet75/batch02-day12_cloud_infras_and_deployment
+    branch: main
+    rootDir: 06-lab-complete/ui
+    region: singapore
+    plan: free
+    autoDeploy: true
+    envVars:
+      - fromGroup: longchau-shared   # cùng AGENT_API_KEY (UI tự điền sidebar)
+      - key: AGENT_API_URL
+        fromService:
+          type: web
+          name: longchau-triage-api
+          property: host             # UI tự prepend https:// nếu thiếu scheme
