@@ -22,7 +22,7 @@ def _normalize_url(url: str) -> str:
 
 
 DEFAULT_API = _normalize_url(os.getenv(
-    "AGENT_API_URL", "https://vinbank-production-agent-production.up.railway.app"
+    "AGENT_API_URL", "https://longchau-triage-api-h597.onrender.com"
 ))
 
 ROUTE_BADGE = {

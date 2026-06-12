@@ -3,6 +3,9 @@
 Productionize agent **Long Châu AI Triage Middleware** (sản phẩm nhóm Day-06, dùng
 **LLM thật qua OpenAI**) theo toàn bộ concept Day-12: Docker → Cloud → Security → Scaling.
 
+**Live (Render):** UI → https://longchau-chatbot-ui-h597.onrender.com ·
+API → https://longchau-triage-api-h597.onrender.com (chi tiết: [`../DEPLOYMENT.md`](../DEPLOYMENT.md))
+
 ## Agent làm gì
 Trợ lý nhà thuốc Long Châu phân loại (triage) câu hỏi của khách rồi xử lý phù hợp:
 - **factual** → AI trả lời thông tin chung về thuốc + gợi ý sản phẩm (search Long Châu).
@@ -79,7 +82,7 @@ docker run -p 8000:8000 -e AGENT_API_KEY=secret -e OPENAI_API_KEY=sk-... longcha
 ## Giao diện Streamlit (chat + streaming)
 ```bash
 cd ui && pip install -r requirements.txt
-export AGENT_API_URL=https://vinbank-production-agent-production.up.railway.app
+export AGENT_API_URL=https://longchau-triage-api-h597.onrender.com
 streamlit run streamlit_app.py     # http://localhost:8501
 ```
 Nhập **API Key** ở sidebar → chat. Badge route (factual/advisory/handoff/crisis) hiện dưới mỗi câu trả lời.
