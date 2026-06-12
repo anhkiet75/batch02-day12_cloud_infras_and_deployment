@@ -17,9 +17,8 @@ services:
     runtime: docker
     repo: https://github.com/anhkiet75/batch02-day12_cloud_infras_and_deployment
     branch: main
-    # dockerfilePath & dockerContext tính TỪ REPO ROOT (không phải rootDir).
-    dockerfilePath: ./06-lab-complete/Dockerfile
-    dockerContext: ./06-lab-complete
+    # rootDir = thư mục service: Render dùng làm CẢ nơi chứa Dockerfile lẫn build context.
+    rootDir: 06-lab-complete
     region: singapore
     plan: free
     healthCheckPath: /health
@@ -43,8 +42,7 @@ services:
     runtime: docker
     repo: https://github.com/anhkiet75/batch02-day12_cloud_infras_and_deployment
     branch: main
-    dockerfilePath: ./06-lab-complete/ui/Dockerfile
-    dockerContext: ./06-lab-complete/ui
+    rootDir: 06-lab-complete/ui
     region: singapore
     plan: free
     autoDeploy: true
