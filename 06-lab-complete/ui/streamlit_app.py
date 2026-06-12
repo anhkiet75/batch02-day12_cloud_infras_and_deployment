@@ -13,9 +13,17 @@ import os
 import requests
 import streamlit as st
 
-DEFAULT_API = os.getenv(
+def _normalize_url(url: str) -> str:
+    """Thêm https:// nếu thiếu scheme (Render fromService.host trả về hostname trần)."""
+    url = (url or "").strip().rstrip("/")
+    if url and not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    return url
+
+
+DEFAULT_API = _normalize_url(os.getenv(
     "AGENT_API_URL", "https://vinbank-production-agent-production.up.railway.app"
-)
+))
 
 ROUTE_BADGE = {
     "factual": ("🟢 Factual", "Trả lời thông tin chung"),
@@ -29,7 +37,7 @@ st.set_page_config(page_title="Long Châu AI Triage", page_icon="💊")
 
 with st.sidebar:
     st.header("⚙️ Kết nối")
-    api_url = st.text_input("API URL", value=DEFAULT_API).rstrip("/")
+    api_url = _normalize_url(st.text_input("API URL", value=DEFAULT_API))
     api_key = st.text_input("API Key (X-API-Key)", type="password",
                             value=os.getenv("AGENT_API_KEY", ""))
     use_stream = st.toggle("Streaming", value=True)
